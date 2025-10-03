@@ -19,11 +19,22 @@ CONFIG_TEMPLATE = "config.json.example"
 NODE_INSTALLER_URL = "https://nodejs.org/dist/v20.17.0/node-v20.17.0-x64.msi"
 
 
+ACCENT_COLOR = "#ff4655"
+BACKGROUND_COLOR = "#0f1923"
+SURFACE_COLOR = "#141821"
+SECONDARY_COLOR = "#1e2530"
+TEXT_PRIMARY = "#f4f5f7"
+TEXT_MUTED = "#9aa6b2"
+SUCCESS_COLOR = "#3ddc97"
+LOG_BACKGROUND = "#0b121b"
+
+
 class InstallerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("ValorantBuddy Setup")
         self.root.geometry("720x520")
+        self.root.minsize(720, 520)
         self.process: subprocess.Popen[str] | None = None
         self.install_thread: threading.Thread | None = None
         self.repo_path: str | None = None
@@ -33,61 +44,153 @@ class InstallerApp:
         self.token_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Pronto")
 
+        self.style = ttk.Style(self.root)
+        self.setup_styles()
         self.create_widgets()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(100, self.flush_log_queue)
 
-    def create_widgets(self) -> None:
-        main = ttk.Frame(self.root, padding=20)
-        main.pack(fill="both", expand=True)
+    def setup_styles(self) -> None:
+        self.root.configure(bg=BACKGROUND_COLOR)
+        try:
+            self.style.theme_use("clam")
+        except tk.TclError:  # pragma: no cover - fallback if theme missing
+            pass
 
-        path_label = ttk.Label(main, text="Cartella di installazione")
+        self.root.option_add("*Font", ("Segoe UI", 11))
+        self.root.option_add("*Foreground", TEXT_PRIMARY)
+
+        self.style.configure("Main.TFrame", background=BACKGROUND_COLOR)
+        self.style.configure("Card.TFrame", background=SURFACE_COLOR)
+        self.style.configure("AccentBar.TFrame", background=ACCENT_COLOR)
+        self.style.configure("Title.TLabel", background=SURFACE_COLOR, foreground=TEXT_PRIMARY, font=("Segoe UI", 20, "bold"))
+        self.style.configure("Section.TLabel", background=SURFACE_COLOR, foreground=TEXT_PRIMARY, font=("Segoe UI", 12, "bold"))
+        self.style.configure("Muted.TLabel", background=SURFACE_COLOR, foreground=TEXT_MUTED, font=("Segoe UI", 10))
+        self.style.configure("Status.TLabel", background=SURFACE_COLOR, foreground=TEXT_PRIMARY, font=("Segoe UI", 12, "bold"))
+
+        self.style.configure("Accent.TButton", background=ACCENT_COLOR, foreground=TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), padding=10, borderwidth=0)
+        self.style.map("Accent.TButton", background=[("active", "#ff6171"), ("disabled", "#4d2d34")], foreground=[("disabled", TEXT_MUTED)])
+
+        self.style.configure("Secondary.TButton", background="#2a3340", foreground=TEXT_PRIMARY, font=("Segoe UI", 10), padding=10, borderwidth=0)
+        self.style.map("Secondary.TButton", background=[("active", "#324050"), ("disabled", "#1f2732")], foreground=[("disabled", TEXT_MUTED)])
+
+        self.style.configure("Start.TButton", background=SUCCESS_COLOR, foreground=BACKGROUND_COLOR, font=("Segoe UI", 11, "bold"), padding=10, borderwidth=0)
+        self.style.map("Start.TButton", background=[("active", "#47e7a8"), ("disabled", "#28483a")], foreground=[("disabled", TEXT_MUTED)])
+
+        self.style.configure("Stop.TButton", background=ACCENT_COLOR, foreground=TEXT_PRIMARY, font=("Segoe UI", 11, "bold"), padding=10, borderwidth=0)
+        self.style.map("Stop.TButton", background=[("active", "#ff6171"), ("disabled", "#4d2d34")], foreground=[("disabled", TEXT_MUTED)])
+
+        self.style.configure("Input.TEntry", fieldbackground=SECONDARY_COLOR, background=SECONDARY_COLOR, foreground=TEXT_PRIMARY, insertcolor=TEXT_PRIMARY, padding=6)
+        self.style.map("Input.TEntry", fieldbackground=[("focus", "#23303f")])
+
+        self.style.configure("Separator.TSeparator", background="#1f2733")
+        self.style.configure("Modern.Vertical.TScrollbar", background=SURFACE_COLOR, troughcolor=BACKGROUND_COLOR, arrowcolor=TEXT_PRIMARY)
+
+    def create_widgets(self) -> None:
+        outer = ttk.Frame(self.root, style="Main.TFrame", padding=24)
+        outer.pack(fill="both", expand=True)
+
+        card = ttk.Frame(outer, style="Card.TFrame", padding=24)
+        card.pack(fill="both", expand=True)
+
+        header = ttk.Frame(card, style="Card.TFrame")
+        header.pack(fill="x", pady=(0, 12))
+
+        title_label = ttk.Label(header, text="ValorantBuddy Setup", style="Title.TLabel")
+        title_label.pack(anchor="w")
+
+        subtitle_label = ttk.Label(
+            header,
+            text="Setup guidato per clonare, configurare e avviare il bot.",
+            style="Muted.TLabel",
+        )
+        subtitle_label.pack(anchor="w", pady=(4, 0))
+
+        accent_bar = tk.Frame(card, bg=ACCENT_COLOR, height=3, bd=0, highlightthickness=0)
+        accent_bar.pack(fill="x", pady=(0, 18))
+
+        path_label = ttk.Label(card, text="Cartella di installazione", style="Section.TLabel")
         path_label.pack(anchor="w")
 
-        path_row = ttk.Frame(main)
-        path_row.pack(fill="x", pady=(0, 12))
+        path_row = ttk.Frame(card, style="Card.TFrame")
+        path_row.pack(fill="x", pady=(6, 16))
 
-        path_entry = ttk.Entry(path_row, textvariable=self.path_var)
+        path_entry = ttk.Entry(path_row, textvariable=self.path_var, style="Input.TEntry")
         path_entry.pack(side="left", fill="x", expand=True)
 
-        browse_button = ttk.Button(path_row, text="Sfoglia", command=self.browse_path)
-        browse_button.pack(side="left", padx=(8, 0))
+        browse_button = ttk.Button(path_row, text="Sfoglia", command=self.browse_path, style="Secondary.TButton")
+        browse_button.pack(side="left", padx=(12, 0))
 
-        token_label = ttk.Label(main, text="Token del bot Discord")
+        token_label = ttk.Label(card, text="Token del bot Discord", style="Section.TLabel")
         token_label.pack(anchor="w")
 
-        token_entry = ttk.Entry(main, textvariable=self.token_var, show="*")
-        token_entry.pack(fill="x", pady=(0, 12))
+        token_entry = ttk.Entry(card, textvariable=self.token_var, show="*", style="Input.TEntry")
+        token_entry.pack(fill="x", pady=(6, 18))
 
-        actions_row = ttk.Frame(main)
-        actions_row.pack(fill="x", pady=(0, 12))
+        actions_row = ttk.Frame(card, style="Card.TFrame")
+        actions_row.pack(fill="x", pady=(0, 18))
 
-        self.install_button = ttk.Button(actions_row, text="Installa / Aggiorna", command=self.start_install)
+        self.install_button = ttk.Button(
+            actions_row,
+            text="Installa / Aggiorna",
+            command=self.start_install,
+            style="Accent.TButton",
+        )
         self.install_button.pack(side="left")
 
-        self.start_button = ttk.Button(actions_row, text="Avvia bot", command=self.start_bot, state="disabled")
-        self.start_button.pack(side="left", padx=(8, 0))
+        self.start_button = ttk.Button(
+            actions_row,
+            text="Avvia bot",
+            command=self.start_bot,
+            state="disabled",
+            style="Start.TButton",
+        )
+        self.start_button.pack(side="left", padx=(12, 0))
 
-        self.stop_button = ttk.Button(actions_row, text="Ferma bot", command=self.stop_bot, state="disabled")
-        self.stop_button.pack(side="left", padx=(8, 0))
+        self.stop_button = ttk.Button(
+            actions_row,
+            text="Ferma bot",
+            command=self.stop_bot,
+            state="disabled",
+            style="Stop.TButton",
+        )
+        self.stop_button.pack(side="left", padx=(12, 0))
 
-        ttk.Separator(main).pack(fill="x", pady=(0, 12))
+        ttk.Separator(card, orient="horizontal", style="Separator.TSeparator").pack(fill="x", pady=(0, 18))
 
-        status_row = ttk.Frame(main)
-        status_row.pack(fill="x", pady=(0, 8))
+        status_row = ttk.Frame(card, style="Card.TFrame")
+        status_row.pack(fill="x", pady=(0, 12))
 
-        status_caption = ttk.Label(status_row, text="Stato:")
+        status_caption = ttk.Label(status_row, text="Stato:", style="Muted.TLabel")
         status_caption.pack(side="left")
 
-        self.status_label = ttk.Label(status_row, textvariable=self.status_var, foreground="black")
-        self.status_label.pack(side="left", padx=(6, 0))
+        self.status_label = ttk.Label(status_row, textvariable=self.status_var, style="Status.TLabel")
+        self.status_label.pack(side="left", padx=(8, 0))
 
-        self.log_text = tk.Text(main, height=15, state="disabled", wrap="word")
-        self.log_text.pack(fill="both", expand=True)
+        log_container = ttk.Frame(card, style="Card.TFrame")
+        log_container.pack(fill="both", expand=True)
 
-        log_scroll = ttk.Scrollbar(main, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
+        self.log_text = tk.Text(
+            log_container,
+            height=15,
+            state="disabled",
+            wrap="word",
+            bg=LOG_BACKGROUND,
+            fg=TEXT_PRIMARY,
+            insertbackground=TEXT_PRIMARY,
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground="#22303c",
+            font=("Consolas", 10),
+            padx=12,
+            pady=12,
+        )
+        self.log_text.pack(side="left", fill="both", expand=True)
+
+        log_scroll = ttk.Scrollbar(log_container, style="Modern.Vertical.TScrollbar", command=self.log_text.yview)
         log_scroll.pack(side="right", fill="y")
+        self.log_text.configure(yscrollcommand=log_scroll.set)
 
     def browse_path(self) -> None:
         selected = filedialog.askdirectory()
