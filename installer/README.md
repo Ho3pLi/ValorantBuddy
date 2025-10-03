@@ -7,7 +7,7 @@ Questa cartella contiene `setup_gui.py`, uno strumento grafico che automatizza i
 - Windows 10 o superiore
 - [Python 3.11+](https://www.python.org/downloads/windows/) con il modulo `tkinter` configurato
 - [Git](https://git-scm.com/download/win) disponibile nel `PATH`
-- [Node.js 16.6+](https://nodejs.org/en/download/) (include `npm`)
+- Connessione internet per scaricare dipendenze (`git`, `npm`, Node). Se `npm` non Ë disponibile, il tool prover‡ a installare automaticamente Node.js LTS (potrebbero servire privilegi amministrativi).
 
 ## Uso rapido (sviluppo)
 
@@ -38,5 +38,5 @@ Per distribuire il tool come `.exe`:
 ## Note
 
 - Se scegli come cartella di destinazione direttamente `...\ValorantBuddy`, il programma la user√† senza creare un sottolivello aggiuntivo.
-- L'interfaccia mostra i log completi di `git`, `npm` e del bot per facilitare il debug.
+- L'interfaccia mostra i log completi di `git`, `npm`, dell'installer di Node.js e del bot per facilitare il debug.
 - Il token viene scritto in chiaro in `config.json`; conserva l'eseguibile in un luogo sicuro.

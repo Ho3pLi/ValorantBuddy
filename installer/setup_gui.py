@@ -1,5 +1,8 @@
 ﻿import json
+import os
 import shutil
+import tempfile
+import urllib.request
 
 import queue
 import subprocess
@@ -13,6 +16,7 @@ REPO_URL = "https://github.com/Ho3pLi/ValorantBuddy.git"
 REPO_DIRNAME = "ValorantBuddy"
 CONFIG_FILE = "config.json"
 CONFIG_TEMPLATE = "config.json.example"
+NODE_INSTALLER_URL = "https://nodejs.org/dist/v20.17.0/node-v20.17.0-x64.msi"
 
 
 class InstallerApp:
@@ -107,10 +111,13 @@ class InstallerApp:
             return
 
         if shutil.which("npm") is None:
-            self.log("npm non trovato nel PATH.")
-            messagebox.showerror("npm non trovato", "Installa Node.js (che include npm) e assicurati che sia nel PATH.")
-            self.set_status("npm non trovato", "#b00020")
-            return
+            self.log("npm non trovato nel PATH. Avvio installazione di Node.js LTS...")
+            self.set_status("Installazione Node.js...", "#d17f00")
+            if not self.install_nodejs():
+                messagebox.showerror("npm non trovato", "Installazione di Node.js non riuscita. Installa Node.js (che include npm) manualmente e assicurati che sia nel PATH.")
+                self.set_status("npm non disponibile", "#b00020")
+                return
+            self.log("npm disponibile dopo l'installazione.")
 
         self.install_button.configure(state="disabled")
         self.start_button.configure(state="disabled")
@@ -175,10 +182,22 @@ class InstallerApp:
             self.root.after(0, lambda: self.install_button.configure(state="normal"))
 
     def run_command(self, command: list[str], cwd: str | None = None) -> None:
-        self.log(f"Eseguo: {' '.join(command)}")
+        display_command = ' '.join(command)
+        resolved = shutil.which(command[0])
+        if resolved:
+            if resolved.lower().endswith((".cmd", ".bat")):
+                actual_command = [os.environ.get("ComSpec", "cmd.exe"), "/c", resolved, *command[1:]]
+            else:
+                actual_command = [resolved, *command[1:]]
+        else:
+            actual_command = command
+
+        self.log(f"Eseguo: {display_command}")
+        if resolved and resolved != command[0]:
+            self.log(f"Eseguibile risolto: {resolved}")
         try:
             process = subprocess.Popen(
-                command,
+                actual_command,
                 cwd=cwd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -196,7 +215,115 @@ class InstallerApp:
 
         code = process.wait()
         if code != 0:
-            raise RuntimeError(f"Il comando {' '.join(command)} è terminato con codice {code}.")
+            raise RuntimeError(f"Il comando {display_command} � terminato con codice {code}.")
+
+
+    def install_nodejs(self) -> bool:
+        self.log("Tentativo di installazione automatica di Node.js LTS.")
+        installers = [
+            self.install_nodejs_via_winget,
+            self.install_nodejs_via_download,
+        ]
+        for installer in installers:
+            try:
+                if installer():
+                    self.try_append_node_to_path()
+                    if shutil.which("npm") is not None:
+                        self.log("Node.js installato correttamente.")
+                        return True
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"Installazione tramite {installer.__name__} non riuscita: {exc}")
+        self.try_append_node_to_path()
+        if shutil.which("npm") is None:
+            self.log("npm ancora non disponibile dopo i tentativi automatici.")
+            return False
+        return True
+
+    def install_nodejs_via_winget(self) -> bool:
+        winget = shutil.which("winget")
+        if winget is None:
+            self.log("winget non disponibile, salto questo metodo di installazione.")
+            return False
+        self.log("Provo a installare Node.js tramite winget...")
+        command = [
+            winget,
+            "install",
+            "-e",
+            "--id",
+            "OpenJS.NodeJS.LTS",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--silent",
+        ]
+        try:
+            self.run_command(command)
+            return True
+        except RuntimeError as exc:
+            self.log(f"Installazione tramite winget fallita: {exc}")
+            return False
+
+    def install_nodejs_via_download(self) -> bool:
+        self.log("Scarico Node.js LTS dal sito ufficiale...")
+        try:
+            with urllib.request.urlopen(NODE_INSTALLER_URL) as response:
+                with tempfile.NamedTemporaryFile(suffix=".msi", delete=False) as tmp_file:
+                    shutil.copyfileobj(response, tmp_file)
+                    installer_path = Path(tmp_file.name)
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Download Node.js fallito: {exc}")
+            return False
+
+        self.log(f"Eseguo il programma di installazione: {installer_path}")
+        try:
+            result = subprocess.run(
+                ["msiexec", "/i", str(installer_path), "/qn", "/norestart"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            self.log("msiexec non trovato. Impossibile installare Node.js automaticamente.")
+            installer_path.unlink(missing_ok=True)
+            return False
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Errore durante l'esecuzione di msiexec: {exc}")
+            installer_path.unlink(missing_ok=True)
+            return False
+
+        output = (result.stdout or "").strip()
+        if output:
+            self.log(output)
+
+        installer_path.unlink(missing_ok=True)
+
+        if result.returncode != 0:
+            self.log(f"msiexec ha restituito codice {result.returncode}")
+            return False
+
+        self.log("Installazione silenziosa completata.")
+        return True
+
+    def try_append_node_to_path(self) -> None:
+        possible_dirs = []
+        for env_var in ("ProgramFiles", "ProgramFiles(x86)"):
+            base = os.environ.get(env_var)
+            if base:
+                possible_dirs.append(Path(base) / "nodejs")
+        possible_dirs.append(Path.home() / "AppData" / "Roaming" / "npm")
+
+        current_path = os.environ.get("PATH", "")
+        for directory in possible_dirs:
+            if directory and directory.exists():
+                dir_str = str(directory)
+                if dir_str not in current_path.split(os.pathsep):
+                    os.environ["PATH"] = dir_str + os.pathsep + current_path
+                    current_path = os.environ["PATH"]
+                    self.log(f"Aggiunto {dir_str} al PATH corrente.")
+                npm_cmd = directory / "npm.cmd"
+                npm_exe = directory / "npm.exe"
+                if npm_cmd.exists() or npm_exe.exists():
+                    break
 
     def start_bot(self) -> None:
         if self.process and self.process.poll() is None:
