@@ -17,6 +17,7 @@ REPO_DIRNAME = "ValorantBuddy"
 CONFIG_FILE = "config.json"
 CONFIG_TEMPLATE = "config.json.example"
 NODE_INSTALLER_URL = "https://nodejs.org/dist/v20.17.0/node-v20.17.0-x64.msi"
+STATE_FILE = Path(__file__).with_name("installer_state.json")
 
 
 ACCENT_COLOR = "#ff4655"
@@ -39,14 +40,21 @@ class InstallerApp:
         self.install_thread: threading.Thread | None = None
         self.repo_path: str | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
+        self.state_path = STATE_FILE
+        self.mode = "setup"
+        self.installed = False
 
         self.path_var = tk.StringVar()
         self.token_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Pronto")
 
+        self.load_state()
+        self.auto_detect_repo()
+
         self.style = ttk.Style(self.root)
         self.setup_styles()
         self.create_widgets()
+        self.apply_mode()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(100, self.flush_log_queue)
 
@@ -96,23 +104,26 @@ class InstallerApp:
         header = ttk.Frame(card, style="Card.TFrame")
         header.pack(fill="x", pady=(0, 12))
 
-        title_label = ttk.Label(header, text="ValorantBuddy Setup", style="Title.TLabel")
-        title_label.pack(anchor="w")
+        self.title_label = ttk.Label(header, text="ValorantBuddy Setup", style="Title.TLabel")
+        self.title_label.pack(anchor="w")
 
-        subtitle_label = ttk.Label(
+        self.subtitle_label = ttk.Label(
             header,
             text="Setup guidato per clonare, configurare e avviare il bot.",
             style="Muted.TLabel",
         )
-        subtitle_label.pack(anchor="w", pady=(4, 0))
+        self.subtitle_label.pack(anchor="w", pady=(4, 0))
 
         accent_bar = tk.Frame(card, bg=ACCENT_COLOR, height=3, bd=0, highlightthickness=0)
         accent_bar.pack(fill="x", pady=(0, 18))
 
-        path_label = ttk.Label(card, text="Cartella di installazione", style="Section.TLabel")
+        self.setup_container = ttk.Frame(card, style="Card.TFrame")
+        self.setup_container.pack(fill="x")
+
+        path_label = ttk.Label(self.setup_container, text="Cartella di installazione", style="Section.TLabel")
         path_label.pack(anchor="w")
 
-        path_row = ttk.Frame(card, style="Card.TFrame")
+        path_row = ttk.Frame(self.setup_container, style="Card.TFrame")
         path_row.pack(fill="x", pady=(6, 16))
 
         path_entry = ttk.Entry(path_row, textvariable=self.path_var, style="Input.TEntry")
@@ -121,40 +132,51 @@ class InstallerApp:
         browse_button = ttk.Button(path_row, text="Sfoglia", command=self.browse_path, style="Secondary.TButton")
         browse_button.pack(side="left", padx=(12, 0))
 
-        token_label = ttk.Label(card, text="Token del bot Discord", style="Section.TLabel")
+        token_label = ttk.Label(self.setup_container, text="Token del bot Discord", style="Section.TLabel")
         token_label.pack(anchor="w")
 
-        token_entry = ttk.Entry(card, textvariable=self.token_var, show="*", style="Input.TEntry")
+        token_entry = ttk.Entry(self.setup_container, textvariable=self.token_var, show="*", style="Input.TEntry")
         token_entry.pack(fill="x", pady=(6, 18))
 
-        actions_row = ttk.Frame(card, style="Card.TFrame")
-        actions_row.pack(fill="x", pady=(0, 18))
+        setup_actions = ttk.Frame(self.setup_container, style="Card.TFrame")
+        setup_actions.pack(fill="x", pady=(0, 18))
 
         self.install_button = ttk.Button(
-            actions_row,
+            setup_actions,
             text="Installa / Aggiorna",
             command=self.start_install,
             style="Accent.TButton",
         )
         self.install_button.pack(side="left")
 
+        self.actions_row = ttk.Frame(card, style="Card.TFrame")
+        self.actions_row.pack(fill="x", pady=(0, 18))
+
         self.start_button = ttk.Button(
-            actions_row,
+            self.actions_row,
             text="Avvia bot",
             command=self.start_bot,
             state="disabled",
             style="Start.TButton",
         )
-        self.start_button.pack(side="left", padx=(12, 0))
+        self.start_button.pack(side="left")
 
         self.stop_button = ttk.Button(
-            actions_row,
+            self.actions_row,
             text="Ferma bot",
             command=self.stop_bot,
             state="disabled",
             style="Stop.TButton",
         )
         self.stop_button.pack(side="left", padx=(12, 0))
+
+        self.manage_setup_button = ttk.Button(
+            self.actions_row,
+            text="Apri setup",
+            command=self.show_setup_view,
+            style="Secondary.TButton",
+        )
+        self.manage_setup_button.pack(side="left", padx=(12, 0))
 
         ttk.Separator(card, orient="horizontal", style="Separator.TSeparator").pack(fill="x", pady=(0, 18))
 
@@ -192,10 +214,140 @@ class InstallerApp:
         log_scroll.pack(side="right", fill="y")
         self.log_text.configure(yscrollcommand=log_scroll.set)
 
+
+    def load_state(self) -> None:
+        if not self.state_path.exists():
+            return
+        try:
+            data = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        repo_path = data.get("repo_path")
+        resolved_repo = None
+        if repo_path:
+            candidate = Path(repo_path)
+            if candidate.exists():
+                resolved_repo = candidate.resolve()
+        last_install = data.get("last_install_path")
+        if last_install and not self.path_var.get().strip():
+            self.path_var.set(last_install)
+        if resolved_repo:
+            self.repo_path = str(resolved_repo)
+            if not self.path_var.get().strip():
+                self.path_var.set(str(resolved_repo.parent))
+        else:
+            self.repo_path = None
+        repo_ready = bool(resolved_repo and self.config_is_ready(resolved_repo))
+        installed_flag = bool(data.get("installed")) and resolved_repo is not None
+        self.installed = repo_ready or installed_flag
+        stored_mode = data.get("mode")
+        if stored_mode in {"setup", "dashboard"}:
+            if stored_mode == "dashboard" and not self.installed:
+                self.mode = "setup"
+            else:
+                self.mode = stored_mode
+        elif repo_ready:
+            self.mode = "dashboard"
+
+    def auto_detect_repo(self) -> None:
+        repo_candidate: Path | None = None
+        if self.repo_path and Path(self.repo_path).exists():
+            repo_candidate = Path(self.repo_path)
+        else:
+            local_repo = Path(__file__).resolve().parents[1]
+            if (local_repo / "package.json").exists():
+                repo_candidate = local_repo
+        if repo_candidate is None:
+            return
+        resolved = repo_candidate.resolve()
+        self.repo_path = str(resolved)
+        config_ready = self.config_is_ready(resolved)
+        if config_ready:
+            self.installed = True
+            if not self.path_var.get().strip():
+                self.path_var.set(str(resolved.parent))
+            if self.mode != "dashboard":
+                self.mode = "dashboard"
+        else:
+            self.installed = False
+
+    def config_is_ready(self, repo: Path) -> bool:
+        config_path = repo / CONFIG_FILE
+        if not config_path.exists():
+            return False
+        try:
+            config_data = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        token_value = config_data.get("token")
+        if isinstance(token_value, str):
+            return bool(token_value.strip())
+        return bool(token_value)
+
+    def save_state(self) -> None:
+        last_path = self.path_var.get().strip()
+        if not last_path and self.repo_path:
+            last_path = str(Path(self.repo_path).parent)
+        data = {
+            "installed": self.installed,
+            "repo_path": self.repo_path,
+            "last_install_path": last_path or None,
+            "mode": self.mode,
+        }
+        try:
+            self.state_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    def show_setup_view(self) -> None:
+        self.mode = "setup"
+        self.apply_mode()
+
+    def show_dashboard_view(self) -> None:
+        if not self.installed:
+            messagebox.showinfo("Setup richiesto", "Completa l'installazione prima di accedere alla dashboard.")
+            return
+        self.mode = "dashboard"
+        self.apply_mode()
+
+    def apply_mode(self) -> None:
+        if self.mode == "setup":
+            self.root.title("ValorantBuddy Setup")
+            if not self.setup_container.winfo_ismapped():
+                self.setup_container.pack(fill="x", before=self.actions_row)
+            self.title_label.configure(text="ValorantBuddy Setup")
+            self.subtitle_label.configure(text="Setup guidato per clonare, configurare e avviare il bot.")
+            if self.installed:
+                self.manage_setup_button.configure(text="Torna alla dashboard", command=self.show_dashboard_view)
+                if not self.manage_setup_button.winfo_ismapped():
+                    self.manage_setup_button.pack(side="left", padx=(12, 0))
+            else:
+                if self.manage_setup_button.winfo_ismapped():
+                    self.manage_setup_button.pack_forget()
+        else:
+            self.root.title("ValorantBuddy Dashboard")
+            if self.setup_container.winfo_ismapped():
+                self.setup_container.pack_forget()
+            self.title_label.configure(text="ValorantBuddy Dashboard")
+            self.subtitle_label.configure(text="Gestisci l'avvio e l'arresto del bot.")
+            self.manage_setup_button.configure(text="Apri setup", command=self.show_setup_view)
+            if not self.manage_setup_button.winfo_ismapped():
+                self.manage_setup_button.pack(side="left", padx=(12, 0))
+        self.update_buttons()
+        self.save_state()
+
+    def handle_install_success(self, repo_path: Path) -> None:
+        self.repo_path = str(repo_path)
+        self.installed = True
+        self.path_var.set(str(repo_path.parent))
+        self.show_dashboard_view()
+
     def browse_path(self) -> None:
         selected = filedialog.askdirectory()
         if selected:
             self.path_var.set(selected)
+            self.save_state()
+            self.update_buttons()
 
     def start_install(self) -> None:
         if self.install_thread and self.install_thread.is_alive():
@@ -226,6 +378,7 @@ class InstallerApp:
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="disabled")
         self.set_status("Installazione in corso...", "#d17f00")
+        self.save_state()
 
         # Run install in background to keep UI responsive.
         self.install_thread = threading.Thread(
@@ -276,6 +429,7 @@ class InstallerApp:
             self.run_command(["npm", "install"], cwd=str(repo_path))
             self.repo_path = str(repo_path)
             self.log("Installazione completata con successo.")
+            self.root.after(0, lambda: self.handle_install_success(repo_path))
             self.root.after(0, lambda: self.set_status("Installazione completata", "#1b8a34"))
         except Exception as exc:  # noqa: BLE001
             self.log(f"Errore: {exc}")
@@ -437,6 +591,16 @@ class InstallerApp:
         if not repo_path:
             messagebox.showerror("Repository non trovato", "Installa il bot o verifica il percorso indicato.")
             return
+
+        if not self.installed:
+            self.installed = True
+            self.repo_path = str(repo_path)
+            if not self.path_var.get().strip():
+                self.path_var.set(str(repo_path.parent))
+        if self.mode != "dashboard":
+            self.show_dashboard_view()
+        else:
+            self.save_state()
 
         self.log("Avvio del bot...")
         try:
