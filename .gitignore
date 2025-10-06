@@ -3,3 +3,6 @@ config.json
 node_modules/
 installer/installer_state.json
 
+ValorantBuddy.spec
+dist/ValorantBuddy.exe
+/build
