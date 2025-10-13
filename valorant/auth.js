@@ -6,7 +6,7 @@ import {
     tokenExpiry,
     decodeToken,
     ensureUsersFolder, wait, getProxyManager
-} from "../misc/util.js";
+} from "../misc/util.headless.js";
 import config from "../misc/config.js";
 import fs from "fs";
 import {client} from "../discord/bot.js";

@@ -1,15 +1,13 @@
 import fs from "fs";
 import { authUser, deleteUserAuth, getUser } from "./auth.js";
 import {
-    discordTag,
     fetch,
     formatBundle,
     formatNightMarket,
-    getPuuid,
     isMaintenance, isSameDay,
     userRegion,
     riotClientHeaders,
-} from "../misc/util.js";
+} from "../misc/util.headless.js";
 import { addBundleData, getSkin, getSkinFromSkinUuid } from "./cache.js";
 import { addStore } from "../misc/stats.js";
 import config from "../misc/config.js";
@@ -65,7 +63,8 @@ export const getShop = async (id, account = null) => {
 }
 
 export const getOffers = async (id, account = null) => {
-    const shopCache = getShopCache(getPuuid(id, account), "offers");
+    const puuid = getUser(id, account)?.puuid;
+    const shopCache = puuid ? getShopCache(puuid, "offers") : null;
     if (shopCache) return { success: true, cached: true, ...shopCache.offers };
 
     const resp = await getShop(id, account);
@@ -89,7 +88,8 @@ export const getOffers = async (id, account = null) => {
 }
 
 export const getBundles = async (id, account = null) => {
-    const shopCache = getShopCache(getPuuid(id, account), "bundles");
+    const puuid = getUser(id, account)?.puuid;
+    const shopCache = puuid ? getShopCache(puuid, "bundles") : null;
     if (shopCache) return { success: true, bundles: shopCache.bundles };
 
     const resp = await getShop(id, account);
@@ -101,7 +101,8 @@ export const getBundles = async (id, account = null) => {
 }
 
 export const getNightMarket = async (id, account = null) => {
-    const shopCache = getShopCache(getPuuid(id, account), "night_market");
+    const puuid = getUser(id, account)?.puuid;
+    const shopCache = puuid ? getShopCache(puuid, "night_market") : null;
     if (shopCache) return { success: true, ...shopCache.night_market };
 
     const resp = await getShop(id, account);
@@ -213,7 +214,7 @@ export const getShopCache = (puuid, target = "offers", print = true) => {
 
         if (Date.now() / 1000 > expiresTimestamp) return null;
 
-        if (print) console.log(`Fetched shop cache for user ${discordTag(puuid)}`);
+        if (print) console.log(`Fetched shop cache for user ${puuid}`);
 
         if (!shopCache.offers.accessory) return null;// If there are no accessories in the cache, it returns null so that the user's shop is checked again.
 

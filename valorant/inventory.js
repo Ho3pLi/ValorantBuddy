@@ -1,9 +1,9 @@
-import {fetch, isMaintenance, userRegion, WeaponTypeUuid} from "../misc/util.js";
+import {fetch, isMaintenance, userRegion} from "../misc/util.headless.js";
 import {authUser, deleteUserAuth, getUser} from "./auth.js";
 import {authFailureMessage, basicEmbed, skinCollectionSingleEmbed, collectionOfWeaponEmbed} from "../discord/embed.js";
 import config from "../misc/config.js";
 import {s} from "../misc/languages.js";
-import {riotClientHeaders} from "../misc/util.js";
+import {riotClientHeaders} from "../misc/util.headless.js";
 
 
 export const getEntitlements = async (user, itemTypeId, itemType="item") => {
